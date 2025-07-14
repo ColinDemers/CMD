@@ -14,8 +14,8 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB
 LOG_FILE = "music_downloader.log"
 
 # --- CONFIG ---
-SPOTIFY_CLIENT_ID = "5b13bd39f5c346e6a65e9555404c66d4"
-SPOTIFY_CLIENT_SECRET = "ac730118122842e7ae6fd9037adeefe4"
+SPOTIFY_CLIENT_ID = ""
+SPOTIFY_CLIENT_SECRET = ""
 
 SPOTIFY_URLS = [
     "https://open.spotify.com/playlist/0dTxQ1v8wokOPLt7O0bo3p"
