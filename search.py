@@ -3,19 +3,22 @@
 import argparse
 from downloader import spotify_client, download_track
 
-def main():
-    parser = argparse.ArgumentParser(description="Search Spotify and download the track using your existing script.")
-    parser.add_argument("--query", "-q", required=True, help="Track title or title + artist")
-
-    args = parser.parse_args()
+def search(query):
     sp = spotify_client()
 
-    results = sp.search(q=args.query, type="track", limit=1)
+    results = sp.search(q=query, type="track", limit=1)
     if not results["tracks"]["items"]:
         print("❌ No results found.")
         return
 
-    track = results["tracks"]["items"][0]
+    return results["tracks"]["items"][0]
+
+def main():
+    parser = argparse.ArgumentParser(description="Search Spotify and download the track using your existing script.")
+    parser.add_argument("--query", "-q", required=True, help="Track title or title + artist")
+    args = parser.parse_args()
+
+    track = search(args.query)
 
     print("\n🎧 Top Spotify Match:")
     print(f"  Title : {track['name']}")

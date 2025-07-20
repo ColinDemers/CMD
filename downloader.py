@@ -10,12 +10,13 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from datetime import datetime
 from mutagen.id3 import ID3, TIT2, TPE1, TALB
+from rapidfuzz import fuzz
 
 LOG_FILE = "music_downloader.log"
 
 # --- CONFIG ---
-SPOTIFY_CLIENT_ID = ""
-SPOTIFY_CLIENT_SECRET = ""
+SPOTIFY_CLIENT_ID = "5b13bd39f5c346e6a65e9555404c66d4"
+SPOTIFY_CLIENT_SECRET = "ac730118122842e7ae6fd9037adeefe4"
 
 SPOTIFY_URLS = [
     "https://open.spotify.com/playlist/0dTxQ1v8wokOPLt7O0bo3p"
@@ -31,7 +32,9 @@ JELLYFIN_PLAYLIST_ID = "5a821269770c3d3e6e124b035348c396"
 
 # --- HELPERS ---
 def sanitize(text):
-    return re.sub(r'[\\/*?:"<>|]', "-", text)
+    sanitized_text = re.sub(r'[\\/*?:"<>|]', "-", text)
+    sanitized_text = sanitized_text.rstrip('.')
+    return sanitized_text
 
 def spotify_client():
     credentials = SpotifyClientCredentials(
@@ -40,11 +43,47 @@ def spotify_client():
     )
     return spotipy.Spotify(client_credentials_manager=credentials)
 
-def similar(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+def is_same_song(track, tag_artist, tag_title, tag_duration=None, duration_margin=5):
 
-def remove_feat(text):
-    return re.sub(r"\s*\(?\s*(feat\.?|ft\.?)\s+[^)]+\)?", "", text, flags=re.I).strip()
+    def normalize(text):
+        if not text:
+            return ""
+        text = text.lower()
+        text = text.replace("_", " ")
+        text = re.sub(r'\s*[\(\[].*?[\)\]]\s*', ' ', text)  # remove brackets (feat. info, etc.)
+        text = re.sub(r'\b(feat|ft|featuring)\b\.?\s+\w+.*', '', text)  # remove "feat Artist"
+        text = re.sub(r'[^a-z0-9\s]', '', text)  # remove punctuation
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def has_modifier(text):
+        modifiers = ['live', 'remix', 'edit', 'mix', 'bootleg', 'cover', 'instrumental', 'rework', 'version']
+        text = text.lower()
+        return any(mod in text for mod in modifiers)
+
+    # Normalize inputs
+    correct_title = normalize(track.get('title', ''))
+    correct_artist = normalize(track.get('artist', ''))
+    provided_title = normalize(tag_title)
+    provided_artist = normalize(tag_artist)
+
+    # Reject remixes, lives, etc.
+    if has_modifier(tag_title) or has_modifier(tag_artist):
+        return False
+
+    # Fuzzy matching
+    title_score = fuzz.token_set_ratio(correct_title, provided_title)
+    artist_score = fuzz.token_set_ratio(correct_artist, provided_artist)
+
+    if title_score < 60 or artist_score < 60:
+        return False
+
+    # Duration check
+    correct_duration = track.get('duration')
+    if correct_duration and tag_duration:
+        if abs(correct_duration - tag_duration) > duration_margin:
+            return False
+
+    return True
 
 # --- MAIN DOWNLOAD FUNCTION ---
 def download_track(track):
@@ -56,7 +95,7 @@ def download_track(track):
     output_dir.mkdir(parents=True, exist_ok=True)
     expected_path = output_dir / f"{title}.mp3"
 
-    # ✅ Check if file exists already
+    #✅ Check if file exists already
     if expected_path.exists() and expected_path.is_file() and expected_path.suffix.lower() == ".mp3":
         log(f"✅ Already exists: {expected_path}")
         if expected_path == '':
@@ -64,20 +103,20 @@ def download_track(track):
         return
 
     query = f"{title} {artist}"
-    log(f"🎵 Trying SoundCloud: {query}")
+    log(f"Trying SoundCloud: {query}")
 
     sc_command = [
         "scdl",
         "-s", query,
         "--path", str(output_dir),
         "--onlymp3",
-        "--no-playlist"
-    ]
+        "--no-playlist"    
+        ]
 
     try:
         subprocess.run(sc_command, check=True, timeout=60)
 
-        # 🔍 Find the newest .mp3 file in the folder
+        #Find the newest .mp3 file in the folder
         mp3_files = list(output_dir.glob("*.mp3"))
         if not mp3_files:
             raise Exception("No MP3 downloaded from SoundCloud.")
@@ -90,25 +129,16 @@ def download_track(track):
             if duration < 60:
                 log('Track not long enough')
                 raise Exception("Too short")
-            tag_artist = str(audio.get("TPE1", [None])[0] or "")
-            tag_title = str(audio.get("TIT2", [None])[0] or "")
+            tag_artist = str(audio.get("TPE1", [None])[0])
+            tag_title = str(audio.get("TIT2", [None])[0])
+
+            if not is_same_song(track, tag_artist, tag_title, duration):
+                raise Exception('Metadata not correct')
         except (ID3NoHeaderError, Exception) as e:
             log(f"⚠️ Metadata read failed: {e}")
             tag_artist, tag_title = "", ""
 
-        # Clean featured artists from metadata and original strings before similarity check
-        clean_tag_artist = remove_feat(tag_artist)
-        clean_tag_title = remove_feat(tag_title)
-        clean_artist = remove_feat(artist)
-        clean_title = remove_feat(title)
-
-        # 🧠 Validate metadata similarity
-        if similar(clean_tag_artist, clean_artist) < 0.7 or similar(clean_tag_title, clean_title) < 0.7:
-            log(f"❌ Bad metadata from SoundCloud. Deleting and falling back to spotDL.")
-            downloaded_file.unlink()
-            raise Exception("Bad metadata")
-
-        # ✏️ Fix metadata to match Spotify data
+        #Fix metadata to match Spotify data
         try:
             if not audio.tags:
                 audio.add_tags()
@@ -119,7 +149,7 @@ def download_track(track):
         except Exception as e:
             log(f"⚠️ Failed to write ID3 tags: {e}")
 
-        # 🏷 Rename to consistent name
+        #  ^=^o  Rename to consistent name
         downloaded_file.rename(expected_path)
         log(f"✅ SoundCloud success: {expected_path}")
         return
@@ -127,11 +157,11 @@ def download_track(track):
     except Exception as e:
         log(f"⚠️ SoundCloud failed for {query}: {e}")
 
-    # ▶️ Fallback to spotDL
-    log(f"🎵 Fallback to spotDL: {query}")
+    #Fallback to spotDL
+    log(f"Fallback to spotDL: {query}")
     spotdl_command = [
         "spotdl", query,
-        "--output", f"{DOWNLOAD_DIR}/{{artist}}/{{album}}/{{title}}.{{output-ext}}",
+        "--output", f"{DOWNLOAD_DIR}/{artist}/{album}/{title}.{{output-ext}}",
         "--format", "mp3",
         "--bitrate", "320k"
     ]
@@ -140,33 +170,6 @@ def download_track(track):
         log(f"✅ spotDL success: {expected_path}")
     except subprocess.CalledProcessError:
         log(f"❌ spotDL failed for {query}")
-
-# --- GET TRACKS ---
-def get_spotify_tracks(sp, url):
-    if "playlist" not in url:
-        log(f"❌ Unsupported URL: {url}")
-        return []
-
-    playlist_id = url.split("/")[-1].split("?")[0]
-    tracks = []
-    offset = 0
-
-    while True:
-        results = sp.playlist_tracks(playlist_id, limit=100, offset=offset)
-        for item in results["items"]:
-            track = item["track"]
-            if track:
-                tracks.append({
-                    "title": track["name"],
-                    "artist": track["artists"][0]["name"],
-                    "album": track["album"]["name"]
-                })
-
-        if results["next"] is None:
-            break
-        offset += 100
-
-    return tracks
 
 # --- JELLYFIN UPDATE ---
 def update_jellyfin_playlist():
@@ -222,7 +225,8 @@ def get_tracks(sp, url):
                 tracks.append({
                     "title": t["name"],
                     "artist": t["artists"][0]["name"],
-                    "album": t["album"]["name"]
+                    "album": t["album"]["name"],
+                    "duration": t["duration_ms"] // 1000
                 })
         if results["next"] is None:
             break
@@ -246,7 +250,7 @@ def main():
         except Exception as e:
             log(f"❌ Failed to download {track['title']} by {track['artist']}: {e}")
 
-    update_jellyfin()
+    update_jellyfin_playlist()
     log("🎉 All done!")
 
 
