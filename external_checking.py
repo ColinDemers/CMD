@@ -17,6 +17,7 @@ def main(dire):
 
                         path_parts = file_path.split(os.sep)
                         artist = path_parts[-2]
+                        album = path_parts[-1]
                         track = os.path.splitext(album)[0]
 
                         track = search.search(f"{track} {artist}")
