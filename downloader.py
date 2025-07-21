@@ -95,11 +95,9 @@ def download_track(track):
     output_dir.mkdir(parents=True, exist_ok=True)
     expected_path = output_dir / f"{title}.mp3"
 
-    #✅ Check if file exists already
+    # Check if file exists already
     if expected_path.exists() and expected_path.is_file() and expected_path.suffix.lower() == ".mp3":
         log(f"✅ Already exists: {expected_path}")
-        if expected_path == '':
-            log('Path is correct')
         return
 
     query = f"{title} {artist}"
@@ -111,12 +109,12 @@ def download_track(track):
         "--path", str(output_dir),
         "--onlymp3",
         "--no-playlist"    
-        ]
+    ]
 
     try:
         subprocess.run(sc_command, check=True, timeout=60)
 
-        #Find the newest .mp3 file in the folder
+        # Find the newest .mp3 file in the folder
         mp3_files = list(output_dir.glob("*.mp3"))
         if not mp3_files:
             raise Exception("No MP3 downloaded from SoundCloud.")
@@ -128,17 +126,17 @@ def download_track(track):
             duration = audio.info.length
             if duration < 60:
                 log('Track not long enough')
-                raise Exception("Too short")
+                raise ValueError("Track is too short")  # Raise ValueError for short track
             tag_artist = str(audio.get("TPE1", [None])[0])
             tag_title = str(audio.get("TIT2", [None])[0])
 
             if not is_same_song(track, tag_artist, tag_title, duration):
-                raise Exception('Metadata not correct')
-        except (ID3NoHeaderError, Exception) as e:
+                raise ValueError('Metadata does not match')  # Raise ValueError for bad metadata
+        except (ID3NoHeaderError, ValueError) as e:
             log(f"⚠️ Metadata read failed: {e}")
-            tag_artist, tag_title = "", ""
+            raise  # Re-raise the exception to trigger fallback
 
-        #Fix metadata to match Spotify data
+        # Fix metadata to match Spotify data
         try:
             if not audio.tags:
                 audio.add_tags()
@@ -149,7 +147,7 @@ def download_track(track):
         except Exception as e:
             log(f"⚠️ Failed to write ID3 tags: {e}")
 
-        #  ^=^o  Rename to consistent name
+        # Rename to consistent name
         downloaded_file.rename(expected_path)
         log(f"✅ SoundCloud success: {expected_path}")
         return
@@ -157,7 +155,7 @@ def download_track(track):
     except Exception as e:
         log(f"⚠️ SoundCloud failed for {query}: {e}")
 
-    #Fallback to spotDL
+    # Fallback to spotDL
     log(f"Fallback to spotDL: {query}")
     spotdl_command = [
         "spotdl", query,
