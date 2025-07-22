@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spotify Song Search with Preview</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        .song {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .song img {
+            width: 50px;
+            height: 50px;
+            margin-right: 10px;
+        }
+        .plus-button, .remove-button {
+            margin-left: auto;
+            background-color: #1DB954;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .remove-button {
+            background-color: #e63946; /* Red color for remove button */
+        }
+    </style>
+</head>
+<body>
+    <h1>Search for Songs</h1>
+    <input type="text" id="search" placeholder="Enter song title..." />
+    <button id="searchBtn">Search</button>
+
+    <div id="results"></div>
+    <div id="message" class="message"></div>
+
+    <script>
+        const clientId = '5b13bd39f5c346e6a65e9555404c66d4'; // Replace with your Client ID
+        const clientSecret = 'ac730118122842e7ae6fd9037adeefe4'; // Replace with your Client Secret
+        const playlistId = '0dTxQ1v8wokOPLt7O0bo3p'; // Replace with your Spotify Playlist ID
+        let accessToken = '';
+        let currentAudio = null;
+        let playlistTracks = [];
+
+        // Get access token
+        async function getAccessToken() {
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: {
+                    Authorization: 'Basic ' + btoa(clientId + ':' + clientSecret),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'grant_type=client_credentials&scope=playlist-modify-public playlist-modify-private playlist-read-private',
+            });
+            const data = await response.json();
+            accessToken = data.access_token;
+            await fetchPlaylistTracks(); // Fetch current playlist tracks
+        }
+
+        async function fetchPlaylistTracks() {
+            let allTracks = [];
+            let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`; // max limit per request
+            while (url) {
+                const response = await fetch(url, {
+                    headers: {
+                        Authorization: 'Bearer ' + accessToken,
+                    },
+                });
+                const data = await response.json();
+                // Append current page track IDs
+                allTracks = allTracks.concat(data.items.map(item => item.track.id));
+                // Spotify API provides next page URL or null if no more pages
+                url = data.next;
+            }
+            playlistTracks = allTracks;
+        }
+
+        // Search for songs
+        async function searchSongs(query) {
+            const response = await fetch(
+                `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`,
+                {
+                    headers: {
+                        Authorization: 'Bearer ' + accessToken,
+                    },
+                }
+            );
+            const data = await response.json();
+            displayResults(data.tracks.items);
+        }
+
+        // Display results and add/remove buttons
+        function displayResults(songs) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = ''; // Clear previous results
+            songs.forEach((song) => {
+                const songDiv = document.createElement('div');
+                songDiv.className = 'song';
+
+                const isInPlaylist = playlistTracks.includes(song.id);
+
+                songDiv.innerHTML = `
+                    <img src="${song.album.images[0].url}" alt="${song.name}" />
+                    <div>
+                        <strong>${song.name}</strong> by ${song.artists.map(artist => artist.name).join(', ')}<br />
+                        Album: ${song.album.name}
+                    </div>
+                    <button class="${isInPlaylist ? 'remove-button' : 'plus-button'}" 
+                            onclick="${isInPlaylist ? `removeFromPlaylist('${song.id}', '${song.name}')` : `addToPlaylist('${song.id}', '${song.name}')`}">
+                        ${isInPlaylist ? 'Remove' : '+'}
+                    </button>
+                `;
+                resultsDiv.appendChild(songDiv);
+            });
+        }
+
+        // Add song to playlist
+        async function addToPlaylist(songId, songName) {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+                method: 'POST',
+                headers: {
+                    Authorization: 'Bearer ' + accessToken,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ uris: [`spotify:track:${songId}`] }),
+            });
+
+            const messageDiv = document.getElementById('message');
+            if (response.ok) {
+                playlistTracks.push(songId); // Update local playlist tracks
+                messageDiv.textContent = `${songName} has been added to your playlist!`;
+                messageDiv.style.color = 'green';
+            } else {
+                const errorData = await response.json();
+                messageDiv.textContent = `Failed to add ${songName} to the playlist: ${errorData.error.message}`;
+                messageDiv.style.color = 'red';
+            }
+        }
+
+        // Remove song from playlist
+        async function removeFromPlaylist(songId, songName) {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: 'Bearer ' + accessToken,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ tracks: [{ uri: `spotify:track:${songId}` }] }),
+            });
+
+            const messageDiv = document.getElementById('message');
+            if (response.ok) {
+                playlistTracks = playlistTracks.filter(id => id !== songId); // Update local playlist tracks
+                messageDiv.textContent = `${songName} has been removed from your playlist!`;
+                messageDiv.style.color = 'red';
+            } else {
+                const errorData = await response.json();
+                messageDiv.textContent = `Failed to remove ${songName} from the playlist: ${errorData.error.message}`;
+                messageDiv.style.color = 'red';
+            }
+        }
+        
+        // Search button event
+        document.getElementById('searchBtn').addEventListener('click', async () => {
+            const query = document.getElementById('search').value;
+            if (query) {
+                await searchSongs(query);
+            }
+        });
+
+        // Initialize
+        getAccessToken();
+    </script>
+</body>
+</html>
